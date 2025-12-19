@@ -1039,7 +1039,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
 
             {/* CTA Button */}
             <a
-              href="/brochure.pdf"
+              href="https://drive.google.com/file/d/15ksXa92VpucB4jakrPrq-ULsaKL9cSms/view?usp=sharing"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-6 py-3.5 bg-[#f7931e] text-white text-sm sm:text-base font-semibold rounded-lg hover:bg-[#e8820f] transition-colors duration-200"

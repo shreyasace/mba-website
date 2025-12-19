@@ -5,6 +5,8 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
+import { supabase } from "@/lib/supabase";
+
 
 interface RegistrationPageProps {
   onNavigate: (page: string) => void;
@@ -26,6 +28,68 @@ export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
     dietaryRequirements: "",
     accommodation: false
   });
+
+  const submitRegistration = async () => {
+  // Basic required field validation
+  if (
+    !formData.registrationType ||
+    !formData.participantType ||
+    !formData.firstName ||
+    !formData.lastName ||
+    !formData.email ||
+    !formData.phone ||
+    !formData.institution ||
+    !formData.country
+  ) {
+    alert("Please fill all required fields.");
+    return;
+  }
+
+  // Author-specific validation
+  if (
+    formData.registrationType === "author" &&
+    (!formData.paperTitle || !formData.trackNumber)
+  ) {
+    alert("Paper title and track are required for authors.");
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from("conference_registrations")
+      .insert([
+        {
+          registration_type: formData.registrationType,
+          participant_type: formData.participantType,
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          email: formData.email,
+          phone: formData.phone,
+          institution: formData.institution,
+          country: formData.country,
+          paper_title:
+            formData.registrationType === "author"
+              ? formData.paperTitle
+              : null,
+          track_number:
+            formData.registrationType === "author"
+              ? formData.trackNumber
+              : null,
+          dietary_requirements: formData.dietaryRequirements,
+          accommodation: formData.accommodation,
+          payment_status: "pending"
+        }
+      ]);
+
+    if (error) throw error;
+
+    // ✅ Success → move to payment page
+    onNavigate("payment");
+  } catch (err) {
+    console.error(err);
+    alert("Registration failed. Please try again.");
+  }
+};
 
   const contentRef = useRef(null);
   const isInView = useInView(contentRef, { once: true, amount: 0.2 });
@@ -562,7 +626,7 @@ export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={currentStep === 4 ? () => alert("Proceeding to payment...") : handleNext}
+                onClick={currentStep === 4 ? submitRegistration : handleNext}
                 className="bg-[#F97316] text-white px-8 py-3 rounded-lg font-semibold text-[16px] hover:bg-[#ea580c] transition-colors shadow-lg"
               >
                 {currentStep === 4 ? "Proceed to Payment" : "Next"}

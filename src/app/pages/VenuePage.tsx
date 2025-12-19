@@ -189,26 +189,30 @@ export function VenuePage({ onNavigate }: VenuePageProps) {
                     </p>
                   </div>
                   <div className="mt-8 flex gap-4">
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="bg-[#F97316] text-white px-8 py-4 rounded-lg font-semibold text-[16px] shadow-lg hover:bg-[#ea580c] transition-colors"
-                    >
-                      Open in Google Maps
-                    </motion.button>
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-lg font-semibold text-[16px] border-2 border-white/30 hover:bg-white/20 transition-colors"
-                    >
-                      Download Directions
-                    </motion.button>
+                  <motion.a
+                    href="https://maps.app.goo.gl/TTJqSdLEynZtzHoG6"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="bg-[#F97316] text-white px-8 py-4 rounded-lg font-semibold text-[16px] shadow-lg hover:bg-[#ea580c] transition-colors inline-block"
+                  >
+                    Open in Google Maps
+                  </motion.a>
                   </div>
                 </div>
                 <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6">
-                  <div className="aspect-video bg-gradient-to-br from-[#F8FAFC] to-white rounded-lg flex items-center justify-center">
-                    <p className="text-[#0B1F3A] text-[18px] font-semibold">Map Placeholder</p>
-                  </div>
+                  <div className="aspect-video rounded-lg overflow-hidden">
+                  <iframe
+                    src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3888.613395373512!2d77.56699307507752!3d12.92500791591416!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bae15e2bdf3d8c9%3A0x1b3aee4d8d4e1c6f!2sBNM%20Institute%20of%20Technology!5e0!3m2!1sen!2sin!4v1736940000000"
+                    className="w-full h-full rounded-lg"
+                    style={{ border: 0 }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    allowFullScreen
+                  />
+                </div>
+
                 </div>
               </div>
             </div>
