@@ -199,20 +199,23 @@ export function CommitteesPage({ onNavigate }: CommitteesPageProps) {
               Steering <span className="text-[#F97316]">Committee</span>
             </h2>
           </motion.div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 max-w-[700px] mx-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 max-w-[800px] mx-auto">
             {steeringCommittee.map((member, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: 0, y: 40 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
-                className="bg-white rounded-xl p-5 sm:p-6 shadow-lg border border-[#E2E8F0] text-center hover:border-[#F97316] transition-all"
+                whileHover={{ y: -4, scale: 1.02 }}
+                className="bg-white rounded-xl p-6 sm:p-8 shadow-lg border-2 border-[#E2E8F0] text-center hover:border-[#F97316] hover:shadow-xl transition-all duration-300"
               >
-                <div className="bg-gradient-to-br from-[#0B1F3A] to-[#1E4ED8] rounded-lg w-14 h-14 mx-auto mb-3 flex items-center justify-center">
-                  <span className="text-white text-[24px]">👤</span>
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-gradient-to-br from-[#0B1F3A] to-[#1E4ED8] flex items-center justify-center mx-auto mb-4 sm:mb-5 overflow-hidden shadow-md">
+                  <svg className="w-12 h-12 sm:w-14 sm:h-14 text-[#F97316]/70" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                  </svg>
                 </div>
-                <h3 className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold mb-1">{member.name}</h3>
-                <p className="text-[#475569] text-[13px] sm:text-[14px]">{member.designation}</p>
+                <h3 className="text-[#0B1F3A] text-[18px] sm:text-[20px] lg:text-[22px] font-['Montserrat',sans-serif] font-bold mb-2">{member.name}</h3>
+                <p className="text-[#F97316] text-[14px] sm:text-[15px] font-medium">{member.designation}</p>
               </motion.div>
             ))}
           </div>
@@ -220,7 +223,7 @@ export function CommitteesPage({ onNavigate }: CommitteesPageProps) {
       </section>
 
       {/* Advisory Board */}
-      <section className="py-12 sm:py-16 lg:py-24 bg-[#F8FAFC]">
+      <section className="py-12 sm:py-16 lg:py-24 bg-white">
         <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16">
           <motion.div
             initial={{ opacity: 0, y: 40 }}
@@ -236,26 +239,28 @@ export function CommitteesPage({ onNavigate }: CommitteesPageProps) {
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
             {advisoryBoard.map((member, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: 0, y: 40 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
-                whileHover={{ y: -6 }}
-                className="bg-white rounded-xl p-5 sm:p-6 shadow-lg border border-[#E2E8F0] hover:border-[#F97316] hover:shadow-xl transition-all duration-300"
+                whileHover={{ y: -4, scale: 1.02 }}
+                className="bg-white rounded-xl p-5 sm:p-6 shadow-lg border-2 border-[#E2E8F0] hover:border-[#F97316] hover:shadow-xl transition-all duration-300"
               >
                 <div className="flex items-center gap-4">
-                  <div className="bg-gradient-to-br from-[#0B1F3A] to-[#1E4ED8] rounded-lg w-14 h-14 flex-shrink-0 flex items-center justify-center">
-                    <span className="text-white text-[24px]">🎓</span>
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-gradient-to-br from-[#0B1F3A] to-[#1E4ED8] flex-shrink-0 flex items-center justify-center shadow-md">
+                    <svg className="w-8 h-8 sm:w-9 sm:h-9 text-[#F97316]/70" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                    </svg>
                   </div>
-                  <div>
-                    <h3 className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold mb-1">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-['Montserrat',sans-serif] font-bold mb-1 truncate">
                       {member.name}
                     </h3>
-                    <p className="text-[#1E4ED8] text-[13px] sm:text-[14px] font-medium">{member.affiliation}</p>
-                    <p className="text-[#64748B] text-[12px]">{member.country}</p>
+                    <p className="text-[#F97316] text-[13px] sm:text-[14px] font-medium leading-snug">{member.affiliation}</p>
+                    <p className="text-[#64748B] text-[12px] sm:text-[13px] mt-1">{member.country}</p>
                   </div>
                 </div>
               </motion.div>
@@ -303,17 +308,24 @@ export function CommitteesPage({ onNavigate }: CommitteesPageProps) {
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="px-4 sm:px-6 lg:px-8 pb-4 sm:pb-5 lg:pb-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3 sm:mt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mt-4 sm:mt-6">
                       {committee.members.map((member, memberIndex) => (
                         <motion.div
                           key={memberIndex}
-                          initial={{ opacity: 0, x: -20 }}
-                          whileInView={{ opacity: 1, x: 0 }}
+                          initial={{ opacity: 0, y: 20 }}
+                          whileInView={{ opacity: 1, y: 0 }}
                           transition={{ delay: memberIndex * 0.05 }}
-                          className="bg-white rounded-lg p-3 sm:p-4 border border-[#E2E8F0] hover:shadow-md transition-all"
+                          whileHover={{ y: -4, scale: 1.02 }}
+                          className="bg-white rounded-xl p-6 sm:p-8 border-2 border-[#E2E8F0] shadow-lg hover:shadow-xl hover:border-[#F97316] transition-all duration-300 text-center"
                         >
-                          <p className="text-[#0B1F3A] text-[14px] sm:text-[16px] lg:text-[18px] font-semibold mb-1">{member.name}</p>
-                          <p className="text-[#475569] text-[12px] sm:text-[13px] lg:text-[14px]">{member.designation}</p>
+                          {/* Profile Image Placeholder */}
+                          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-gradient-to-br from-[#0B1F3A] to-[#1E4ED8] flex items-center justify-center mx-auto mb-4 sm:mb-5 overflow-hidden shadow-md">
+                            <svg className="w-12 h-12 sm:w-14 sm:h-14 text-[#F97316]/70" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                            </svg>
+                          </div>
+                          <h4 className="text-[#0B1F3A] text-[16px] sm:text-[18px] lg:text-[20px] font-['Montserrat',sans-serif] font-bold mb-2">{member.name}</h4>
+                          <p className="text-[#F97316] text-[13px] sm:text-[14px] lg:text-[15px] font-medium">{member.designation}</p>
                         </motion.div>
                       ))}
                     </div>
