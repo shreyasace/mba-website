@@ -2,52 +2,42 @@ import { motion, useInView } from "motion/react";
 import { useRef, useState, useEffect } from "react";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { supabase } from "../lib/supabase";
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 
 interface RegistrationPageProps {
   onNavigate: (page: string) => void;
 }
 
-// Validation helper functions
 const validateEmail = (email: string): { isValid: boolean; error?: string } => {
-  if (!email || email.trim() === '') {
-    return { isValid: false, error: 'Email address is required.' };
+  if (!email || email.trim() === "") {
+    return { isValid: false, error: "Email address is required." };
   }
 
-  // Strict email regex
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
   if (!emailRegex.test(email)) {
-    return { isValid: false, error: 'Please enter a valid email address (e.g., name@example.com).' };
-  }
-
-  // Domain sanity validation for common providers
-  const lowerEmail = email.toLowerCase();
-  const domainPart = lowerEmail.split('@')[1];
-  if (domainPart) {
-    const domainName = domainPart.split('.')[0];
-    const tld = domainPart.split('.').pop() || '';
-    
-    const commonProviders = ['gmail', 'yahoo', 'outlook', 'hotmail'];
-    if (commonProviders.includes(domainName) && tld.length < 3) {
-      return { 
-        isValid: false, 
-        error: `Please enter a valid email address (e.g., name@${domainName}.com).` 
-      };
-    }
+    return {
+      isValid: false,
+      error: "Please enter a valid email address (e.g., name@example.com).",
+    };
   }
 
   return { isValid: true };
 };
 
 const validatePhone = (phone: string): boolean => {
-  // Must start with + and have 10-15 digits
   const phoneRegex = /^\+[0-9]{10,15}$/;
-  const cleanedPhone = phone.replace(/[\s-]/g, '');
+  const cleanedPhone = phone.replace(/[\s-]/g, "");
   return phoneRegex.test(cleanedPhone);
 };
 
-// Field error type
 interface FieldErrors {
   name?: string;
   nationality?: string;
@@ -55,6 +45,8 @@ interface FieldErrors {
   email?: string;
   affiliation?: string;
   placeOfAffiliation?: string;
+  institution?: string;
+  country?: string;
   paperTitle?: string;
   trackNumber?: string;
   paperId?: string;
@@ -64,43 +56,208 @@ interface FieldErrors {
   paymentProof?: string;
 }
 
-// Touched fields type
 interface TouchedFields {
   [key: string]: boolean;
 }
 
 export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
-  const [formData, setFormData] = useState({
-    name: "",
-    nationality: "",
-    phone: "",
-    email: "",
-    affiliation: "",
-    placeOfAffiliation: "",
-    paperTitle: "",
-    trackNumber: "",
-    paperId: "",
-    amountPaid: "",
-    paymentAccount: "",
-    transactionId: "",
-    paymentProof: null as File | null
-  });
-
   const [errors, setErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<TouchedFields>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [shakeField, setShakeField] = useState<string | null>(null);
   const [isFormValid, setIsFormValid] = useState(false);
-
   const formRef = useRef<HTMLFormElement>(null);
   const fieldRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [isSendingLink, setIsSendingLink] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
 
   const contentRef = useRef(null);
   const isInView = useInView(contentRef, { once: true, amount: 0.2 });
 
+  const [currentStep, setCurrentStep] = useState(() => {
+    const saved = localStorage.getItem("registrationStep");
+    return saved ? parseInt(saved) : 1;
+  });
+
+  const [formData, setFormData] = useState(() => {
+    const saved = localStorage.getItem("registrationFormData");
+    return saved
+      ? JSON.parse(saved)
+      : {
+          registrationType: "",
+          participantType: "",
+          name: "",
+          nationality: "",
+          email: "",
+          phone: "",
+          affiliation: "",
+          placeOfAffiliation: "",
+          institution: "",
+          country: "",
+          paperTitle: "",
+          trackNumber: "",
+          paperId: "",
+          amountPaid: "",
+          paymentAccount: "",
+          transactionId: "",
+          paymentProof: null,
+          dietaryRequirements: "",
+          accommodation: false,
+        };
+  });
+
+  useEffect(() => {
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const error = hashParams.get("error");
+    const errorDescription = hashParams.get("error_description");
+    if (error) {
+      let errorMessage = "Authentication failed. ";
+      if (error === "access_denied" && errorDescription?.includes("expired")) {
+        errorMessage =
+          "Email verification link has expired. Please request a new one.";
+      } else if (errorDescription) {
+        errorMessage += errorDescription.replace(/\+/g, " ");
+      }
+      setAuthError(errorMessage);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_IN" && session?.user) {
+          setEmailVerified(true);
+          setAuthError(null);
+          localStorage.setItem("emailVerified", "true");
+          localStorage.setItem("verifiedEmail", session.user.email || "");
+
+          const savedStep = localStorage.getItem("registrationStep");
+          if (savedStep && parseInt(savedStep) > 1) {
+            setShowWelcomeBack(true);
+            setTimeout(() => setShowWelcomeBack(false), 5000);
+          }
+        }
+      }
+    );
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) {
+        setEmailVerified(true);
+        localStorage.setItem("emailVerified", "true");
+        localStorage.setItem("verifiedEmail", data.session.user.email || "");
+      }
+    });
+
+    const wasVerified = localStorage.getItem("emailVerified") === "true";
+    const verifiedEmail = localStorage.getItem("verifiedEmail");
+    if (wasVerified && verifiedEmail && verifiedEmail === formData.email) {
+      setEmailVerified(true);
+    }
+  }, [formData.email]);
+
+  useEffect(() => {
+    localStorage.setItem("registrationFormData", JSON.stringify(formData));
+  }, [formData]);
+
+  useEffect(() => {
+    localStorage.setItem("registrationStep", currentStep.toString());
+  }, [currentStep]);
+
+  const sendMagicLink = async () => {
+    if (!formData.email) {
+      alert("Please enter your email first.");
+      return;
+    }
+
+    try {
+      setIsSendingLink(true);
+      const { error } = await supabase.auth.signInWithOtp({
+        email: formData.email,
+        options: {
+          emailRedirectTo: window.location.origin + "./",
+        },
+      });
+
+      if (error) throw error;
+      alert("Verification link sent! Please check your email.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to send verification email.");
+    } finally {
+      setIsSendingLink(false);
+    }
+  };
+
+  const submitRegistration = async () => {
+    if (
+      !formData.name ||
+      !formData.nationality ||
+      !formData.email ||
+      !formData.phone ||
+      !formData.affiliation ||
+      !formData.placeOfAffiliation ||
+      !formData.institution ||
+      !formData.country
+    ) {
+      alert("Please fill all required fields.");
+      return;
+    }
+
+    if (
+      !formData.paperTitle ||
+      !formData.trackNumber ||
+      !formData.paperId
+    ) {
+      alert("Paper title, track, and paper ID are required.");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("conference_registrations")
+        .insert([
+          {
+            name: formData.name,
+            nationality: formData.nationality,
+            email: formData.email,
+            phone: formData.phone,
+            affiliation: formData.affiliation,
+            place_of_affiliation: formData.placeOfAffiliation,
+            institution: formData.institution,
+            country: formData.country,
+            paper_title: formData.paperTitle,
+            track_number: formData.trackNumber,
+            paper_id: formData.paperId,
+            amount_paid: formData.amountPaid,
+            payment_account: formData.paymentAccount,
+            transaction_id: formData.transactionId,
+            dietary_requirements: formData.dietaryRequirements,
+            accommodation: formData.accommodation,
+            payment_status: "pending",
+          },
+        ]);
+
+      if (error) throw error;
+      alert(
+        "Registration submitted successfully! We will verify your payment and send confirmation to your email."
+      );
+      onNavigate("payment");
+    } catch (err) {
+      console.error(err);
+      alert("Registration failed. Please try again.");
+    }
+  };
+
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.6 } }
+    visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
   };
 
   const registrationFees = [
@@ -108,55 +265,119 @@ export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
       category: "Indian Participants",
       types: [
         { type: "Student (Indian)", earlyBird: "₹800", regular: "₹1,200" },
-        { type: "Faculty/Researcher (Indian)", earlyBird: "₹2,000", regular: "₹3,000" },
-        { type: "Industry/Practitioner (Indian)", earlyBird: "₹3,000", regular: "₹4,000" }
-      ]
+        {
+          type: "Faculty/Researcher (Indian)",
+          earlyBird: "₹2,000",
+          regular: "₹3,000",
+        },
+        {
+          type: "Industry/Practitioner (Indian)",
+          earlyBird: "₹3,000",
+          regular: "₹4,000",
+        },
+      ],
     },
     {
       category: "International Participants",
       types: [
-        { type: "Student (International)", earlyBird: "$60", regular: "$80" },
-        { type: "Faculty/Researcher (International)", earlyBird: "$80", regular: "$100" },
-        { type: "Industry/Practitioner (International)", earlyBird: "$120", regular: "$150" }
-      ]
-    }
+        {
+          type: "Student (International)",
+          earlyBird: "$60",
+          regular: "$80",
+        },
+        {
+          type: "Faculty/Researcher (International)",
+          earlyBird: "$80",
+          regular: "$100",
+        },
+        {
+          type: "Industry/Practitioner (International)",
+          earlyBird: "$120",
+          regular: "$150",
+        },
+      ],
+    },
   ];
 
   const feeOptions = [
     { value: "800", label: "Student (Indian) - Early Bird: ₹800" },
     { value: "1200", label: "Student (Indian) - Regular: ₹1,200" },
     { value: "2000", label: "Faculty/Researcher (Indian) - Early Bird: ₹2,000" },
-    { value: "3000-faculty", label: "Faculty/Researcher (Indian) - Regular: ₹3,000" },
-    { value: "3000-industry", label: "Industry/Practitioner (Indian) - Early Bird: ₹3,000" },
-    { value: "4000", label: "Industry/Practitioner (Indian) - Regular: ₹4,000" },
+    {
+      value: "3000-faculty",
+      label: "Faculty/Researcher (Indian) - Regular: ₹3,000",
+    },
+    {
+      value: "3000-industry",
+      label: "Industry/Practitioner (Indian) - Early Bird: ₹3,000",
+    },
+    {
+      value: "4000",
+      label: "Industry/Practitioner (Indian) - Regular: ₹4,000",
+    },
     { value: "60", label: "Student (International) - Early Bird: $60" },
     { value: "80-student", label: "Student (International) - Regular: $80" },
-    { value: "80-faculty", label: "Faculty/Researcher (International) - Early Bird: $80" },
-    { value: "100", label: "Faculty/Researcher (International) - Regular: $100" },
-    { value: "120", label: "Industry/Practitioner (International) - Early Bird: $120" },
-    { value: "150", label: "Industry/Practitioner (International) - Regular: $150" }
+    {
+      value: "80-faculty",
+      label: "Faculty/Researcher (International) - Early Bird: $80",
+    },
+    {
+      value: "100",
+      label: "Faculty/Researcher (International) - Regular: $100",
+    },
+    {
+      value: "120",
+      label: "Industry/Practitioner (International) - Early Bird: $120",
+    },
+    {
+      value: "150",
+      label: "Industry/Practitioner (International) - Regular: $150",
+    },
   ];
 
+  const handleNext = () => {
+    if (currentStep === 2 && !emailVerified) {
+      alert("Please verify your email before continuing.");
+      return;
+    }
+    if (currentStep < 4) setCurrentStep(currentStep + 1);
+  };
+
+  const handlePrevious = () => {
+    if (currentStep > 1) setCurrentStep(currentStep - 1);
+  };
+
   const handleInputChange = (field: string, value: any) => {
-    setFormData({ ...formData, [field]: value });
-    // Mark field as touched (but for email, only mark on blur)
-    if (!touched[field] && field !== 'email') {
-      setTouched({ ...touched, [field]: true });
+    setFormData({
+      ...formData,
+      [field]: value,
+    });
+
+    if (!touched[field] && field !== "email") {
+      setTouched({
+        ...touched,
+        [field]: true,
+      });
     }
-    // For email: clear errors while typing, don't validate until blur
-    if (field === 'email') {
-      // Clear the error when user starts typing
+
+    if (field === "email") {
       if (errors.email) {
-        setErrors(prev => ({ ...prev, email: undefined }));
+        setErrors((prev) => ({
+          ...prev,
+          email: undefined,
+        }));
       }
-      return; // Don't validate email on every keystroke
+      return;
     }
-    // Validate other fields on change
+
     validateField(field, value);
   };
 
   const handleBlur = (field: string) => {
-    setTouched({ ...touched, [field]: true });
+    setTouched({
+      ...touched,
+      [field]: true,
+    });
     validateField(field, formData[field as keyof typeof formData]);
   };
 
@@ -164,79 +385,93 @@ export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
     let error: string | undefined;
 
     switch (field) {
-      case 'name':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "name":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         } else if (value.trim().length < 2) {
-          error = 'Name must be at least 2 characters';
+          error = "Name must be at least 2 characters";
         }
         break;
-      case 'nationality':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "nationality":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         }
         break;
-      case 'phone':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "phone":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         } else if (!validatePhone(value)) {
-          error = 'Enter a valid phone number with country code (e.g., +91 9876543210)';
+          error =
+            "Enter a valid phone number with country code (e.g., +91 9876543210)";
         }
         break;
-      case 'email':
-        const emailValidation = validateEmail(value || '');
+      case "email":
+        const emailValidation = validateEmail(value || "");
         if (!emailValidation.isValid) {
           error = emailValidation.error;
         }
         break;
-      case 'affiliation':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "affiliation":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         }
         break;
-      case 'placeOfAffiliation':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "placeOfAffiliation":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         }
         break;
-      case 'paperTitle':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "institution":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         }
         break;
-      case 'trackNumber':
+      case "country":
         if (!value) {
-          error = 'Please select a research track';
+          error = "Please select a country";
         }
         break;
-      case 'paperId':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "paperTitle":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         }
         break;
-      case 'amountPaid':
+      case "trackNumber":
         if (!value) {
-          error = 'Please select the amount you paid';
+          error = "Please select a research track";
         }
         break;
-      case 'paymentAccount':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
+      case "paperId":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
         }
         break;
-      case 'transactionId':
-        if (!value || value.trim() === '') {
-          error = 'This field is required';
-        }
-        break;
-      case 'paymentProof':
+      case "amountPaid":
         if (!value) {
-          error = 'Please upload proof of payment';
+          error = "Please select the amount you paid";
+        }
+        break;
+      case "paymentAccount":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
+        }
+        break;
+      case "transactionId":
+        if (!value || value.trim() === "") {
+          error = "This field is required";
+        }
+        break;
+      case "paymentProof":
+        if (!value) {
+          error = "Please upload proof of payment";
         }
         break;
     }
 
-    setErrors(prev => ({ ...prev, [field]: error }));
+    setErrors((prev) => ({
+      ...prev,
+      [field]: error,
+    }));
     return error;
   };
 
@@ -244,80 +479,124 @@ export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
     const newErrors: FieldErrors = {};
     let isValid = true;
 
-    // Validate all fields
-    Object.keys(formData).forEach(field => {
-      const error = validateField(field, formData[field as keyof typeof formData]);
+    const fieldsToValidate = [
+      "name",
+      "nationality",
+      "phone",
+      "email",
+      "affiliation",
+      "placeOfAffiliation",
+      "institution",
+      "country",
+      "paperTitle",
+      "trackNumber",
+      "paperId",
+      "amountPaid",
+      "paymentAccount",
+      "transactionId",
+      "paymentProof",
+    ];
+
+    fieldsToValidate.forEach((field) => {
+      const error = validateField(
+        field,
+        formData[field as keyof typeof formData]
+      );
       if (error) {
         newErrors[field as keyof FieldErrors] = error;
         isValid = false;
       }
     });
 
-    // Mark all fields as touched
     const allTouched: TouchedFields = {};
-    Object.keys(formData).forEach(field => {
+    fieldsToValidate.forEach((field) => {
       allTouched[field] = true;
     });
     setTouched(allTouched);
-
     setErrors(newErrors);
     return isValid;
   };
 
-  // Check form validity on every change
   useEffect(() => {
     const checkValidity = () => {
-      const requiredFields = ['name', 'nationality', 'phone', 'email', 'affiliation', 'placeOfAffiliation', 'paperTitle', 'trackNumber', 'paperId', 'amountPaid', 'paymentAccount', 'transactionId', 'paymentProof'];
-      
+      const requiredFields = [
+        "name",
+        "nationality",
+        "phone",
+        "email",
+        "affiliation",
+        "placeOfAffiliation",
+        "institution",
+        "country",
+        "paperTitle",
+        "trackNumber",
+        "paperId",
+        "amountPaid",
+        "paymentAccount",
+        "transactionId",
+        "paymentProof",
+      ];
+
       for (const field of requiredFields) {
         const value = formData[field as keyof typeof formData];
-        if (!value || (typeof value === 'string' && value.trim() === '')) {
+        if (!value || (typeof value === "string" && value.trim() === "")) {
           setIsFormValid(false);
           return;
         }
       }
-      
-      // Check specific validations
+
       const emailValidation = validateEmail(formData.email);
       if (!emailValidation.isValid || !validatePhone(formData.phone)) {
         setIsFormValid(false);
         return;
       }
-      
+
       setIsFormValid(true);
     };
-    
+
     checkValidity();
   }, [formData]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      // Validate file size (max 5MB)
+
       if (file.size > 5 * 1024 * 1024) {
-        setErrors(prev => ({ ...prev, paymentProof: 'File size must be less than 5MB' }));
+        setErrors((prev) => ({
+          ...prev,
+          paymentProof: "File size must be less than 5MB",
+        }));
         return;
       }
-      setFormData({ ...formData, paymentProof: file });
-      setErrors(prev => ({ ...prev, paymentProof: undefined }));
-      setTouched({ ...touched, paymentProof: true });
+
+      setFormData({
+        ...formData,
+        paymentProof: file,
+      });
+      setErrors((prev) => ({
+        ...prev,
+        paymentProof: undefined,
+      }));
+      setTouched({
+        ...touched,
+        paymentProof: true,
+      });
     }
   };
 
   const handleSubmit = () => {
     setIsSubmitting(true);
-    
     const isValid = validateAllFields();
-    
+
     if (!isValid) {
-      // Find first error field and scroll to it
-      const errorFields = Object.keys(errors).filter(key => errors[key as keyof FieldErrors]);
+      const errorFields = Object.keys(errors).filter(
+        (key) => errors[key as keyof FieldErrors]
+      );
       if (errorFields.length > 0) {
         const firstErrorField = errorFields[0];
         const fieldElement = fieldRefs.current[firstErrorField];
         if (fieldElement) {
-          fieldElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Trigger shake animation
+          fieldElement.scrollIntoView({ behavior: "smooth", block: "center" });
           setShakeField(firstErrorField);
           setTimeout(() => setShakeField(null), 500);
         }
@@ -325,653 +604,806 @@ export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
       setIsSubmitting(false);
       return;
     }
-    
-    // Success
-    alert("Registration submitted successfully! We will verify your payment and send confirmation to your email.");
-    setIsSubmitting(false);
+
+    submitRegistration();
   };
 
-  // Get input class based on validation state
-  const getInputClassName = (field: string, baseClass: string = "h-10"): string => {
+  const getInputClassName = (
+    field: string,
+    baseClass: string = "h-10"
+  ): string => {
     const hasError = touched[field] && errors[field as keyof FieldErrors];
-    const isValid = touched[field] && !errors[field as keyof FieldErrors] && formData[field as keyof typeof formData];
-    
+    const isValid =
+      touched[field] &&
+      !errors[field as keyof FieldErrors] &&
+      formData[field as keyof typeof formData];
+
     let className = baseClass;
-    
     if (hasError) {
-      className += " border-[#E53935] bg-[#FFF5F5] focus:border-[#E53935] focus:ring-[#E53935]";
+      className +=
+        " border-2 border-[#E53935] bg-[#FFF5F5] focus:border-[#E53935] focus:ring-[#E53935]";
     } else if (isValid) {
-      className += " border-[#10B981] focus:border-[#10B981] focus:ring-[#10B981]";
+      className +=
+        " border-2 border-[#10B981] focus:border-[#10B981] focus:ring-[#10B981]";
+    } else {
+      className += " border-2 border-[#E2E8F0]";
     }
-    
     if (shakeField === field) {
       className += " animate-shake";
     }
-    
     return className;
   };
 
-  // Get select trigger class based on validation state
   const getSelectClassName = (field: string): string => {
     const hasError = touched[field] && errors[field as keyof FieldErrors];
-    const isValid = touched[field] && !errors[field as keyof FieldErrors] && formData[field as keyof typeof formData];
-    
+    const isValid =
+      touched[field] &&
+      !errors[field as keyof FieldErrors] &&
+      formData[field as keyof typeof formData];
+
     let className = "h-10";
-    
     if (hasError) {
-      className += " border-[#E53935] bg-[#FFF5F5]";
+      className += " border-2 border-[#E53935] bg-[#FFF5F5]";
     } else if (isValid) {
-      className += " border-[#10B981]";
+      className += " border-2 border-[#10B981]";
+    } else {
+      className += " border-2 border-[#E2E8F0]";
     }
-    
     if (shakeField === field) {
       className += " animate-shake";
     }
-    
     return className;
   };
 
-  // Error message component
   const ErrorMessage = ({ field }: { field: keyof FieldErrors }) => {
     if (!touched[field] || !errors[field]) return null;
-    
-    return (
-      <p className="text-[#E53935] text-[11px] sm:text-[12px] mt-1 flex items-center gap-1" role="alert" aria-live="polite">
-        <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-        </svg>
-        {errors[field]}
-      </p>
-    );
+    return <p className="text-sm text-[#E53935] mt-2">{errors[field]}</p>;
   };
 
-  // Valid indicator component
   const ValidIndicator = ({ field }: { field: string }) => {
-    const isValid = touched[field] && !errors[field as keyof FieldErrors] && formData[field as keyof typeof formData];
-    
+    const isValid =
+      touched[field] &&
+      !errors[field as keyof FieldErrors] &&
+      formData[field as keyof typeof formData];
     if (!isValid) return null;
-    
-    return (
-      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#10B981]">
-        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-        </svg>
-      </span>
-    );
+    return <span className="text-[#10B981] ml-2">✓</span>;
   };
 
   return (
-    <div className="w-full overflow-x-hidden">
+    <div className="w-full bg-white">
       {/* Hero Section */}
-      <section className="relative bg-gradient-to-br from-[#0B1F3A] via-[#1E4ED8] to-[#0B1F3A] py-12 sm:py-16 lg:py-20">
+      <section className="relative bg-gradient-to-br from-[#0B1F3A] via-[#1E4ED8] to-[#0B1F3A] py-16 sm:py-24 lg:py-32">
         <div className="absolute inset-0 opacity-10">
-          <div className="absolute inset-0" style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }} />
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage:
+                "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
+            }}
+          />
         </div>
         <div className="relative max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16 text-center">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.6 }}
           >
-            <h1 className="text-white text-[28px] sm:text-[36px] lg:text-[44px] font-['Montserrat',sans-serif] font-bold mb-2 sm:mb-3">
+            <h1 className="text-white text-[32px] sm:text-[42px] lg:text-[56px] xl:text-[64px] font-['Montserrat',sans-serif] font-bold mb-4 sm:mb-6">
               Conference <span className="text-[#F97316]">Registration</span>
             </h1>
-            <p className="text-white/90 text-[14px] sm:text-[16px] lg:text-[17px] max-w-[700px] mx-auto">
-              Secure your spot at the premier conference on strategic management and digital transformation
+            <p className="text-white/90 text-[16px] sm:text-[18px] lg:text-[20px] max-w-[800px] mx-auto leading-relaxed">
+              Join us for a premier conference on strategic management and digital transformation
             </p>
           </motion.div>
         </div>
       </section>
 
-      {/* Registration Fees */}
-      <section className="py-12 sm:py-16 lg:py-20 bg-white">
+      {/* Registration Fees Section */}
+      <motion.section
+        variants={fadeInUp}
+        initial="hidden"
+        whileInView="visible"
+        className="py-12 sm:py-16 lg:py-24 bg-white"
+      >
         <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="mb-10 lg:mb-12"
-          >
-            <h2 className="text-[#0B1F3A] text-[24px] sm:text-[30px] lg:text-[36px] font-['Montserrat',sans-serif] font-bold mb-2 text-center">
+          <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="mb-8 sm:mb-12">
+            <h2 className="text-[#0B1F3A] text-[28px] sm:text-[36px] lg:text-[48px] font-['Montserrat',sans-serif] font-bold mb-4 text-center">
               Registration <span className="text-[#F97316]">Fees</span>
             </h2>
-            <p className="text-[#475569] text-[14px] sm:text-[16px] text-center mb-8 lg:mb-10">
+            <p className="text-[#475569] text-[15px] sm:text-[17px] text-center">
               Early bird rates valid until March 20, 2026
             </p>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-              {registrationFees.map((category, index) => (
-                <motion.div
-                  key={index}
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  className="bg-[#F8FAFC] rounded-lg p-5 sm:p-6 border border-[#E2E8F0]"
-                >
-                  <h3 className="text-[#0B1F3A] text-[18px] sm:text-[20px] lg:text-[22px] font-['Montserrat',sans-serif] font-bold mb-4">
+          </motion.div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-10">
+            {registrationFees.map((category, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 40 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                className="bg-white rounded-xl border-2 border-[#E2E8F0] overflow-hidden shadow-lg hover:shadow-xl hover:border-[#F97316] transition-all"
+              >
+                <div className="bg-gradient-to-r from-[#0B1F3A] to-[#1E4ED8] p-6 sm:p-8">
+                  <h3 className="text-white text-[18px] sm:text-[20px] font-['Montserrat',sans-serif] font-bold">
                     {category.category}
                   </h3>
-                  <div className="space-y-3">
+                </div>
+                <div className="p-6 sm:p-8">
+                  <div className="space-y-4">
                     {category.types.map((type, typeIndex) => (
-                      <div key={typeIndex} className="bg-white rounded-md p-3 border border-[#E2E8F0]">
-                        <p className="text-[#0F172A] text-[13px] sm:text-[14px] font-semibold mb-2">{type.type}</p>
-                        <div className="flex justify-between items-center">
-                          <div className="text-center flex-1">
-                            <p className="text-[#475569] text-[10px] sm:text-[11px] mb-0.5">Early Bird</p>
-                            <p className="text-[#1E4ED8] text-[16px] sm:text-[20px] font-bold">{type.earlyBird}</p>
-                          </div>
-                          <div className="w-px h-10 bg-[#E2E8F0]" />
-                          <div className="text-center flex-1">
-                            <p className="text-[#475569] text-[10px] sm:text-[11px] mb-0.5">Regular</p>
-                            <p className="text-[#0B1F3A] text-[16px] sm:text-[20px] font-bold">{type.regular}</p>
-                          </div>
+                      <div
+                        key={typeIndex}
+                        className="flex items-center justify-between pb-4 border-b border-[#E2E8F0] last:border-0"
+                      >
+                        <div>
+                          <p className="text-[#0B1F3A] text-[15px] sm:text-[16px] font-semibold">
+                            {type.type}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[#10B981] text-[14px] sm:text-[15px] font-semibold">
+                            {type.earlyBird}
+                          </p>
+                          <p className="text-[#64748B] text-[13px] sm:text-[14px]">
+                            {type.regular}
+                          </p>
                         </div>
                       </div>
                     ))}
                   </div>
-                </motion.div>
-              ))}
-            </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            className="mt-8 sm:mt-12 bg-[#F0F9FF] border-2 border-[#0B1F3A]/20 rounded-xl p-6 sm:p-8"
+          >
+            <p className="text-[#0B1F3A] text-[14px] sm:text-[15px] leading-relaxed">
+              <span className="font-semibold">Note:</span> Registration fee includes conference kit, meals, and access to all sessions. At least one author per accepted paper must register. Certificates for co-authors (not registered) will be provided upon payment of Rs. 500 per co-author.
+            </p>
+          </motion.div>
+        </div>
+      </motion.section>
+
+      {/* Bank Details Section */}
+      <motion.section
+        variants={fadeInUp}
+        initial="hidden"
+        whileInView="visible"
+        className="py-12 sm:py-16 lg:py-24 bg-[#F8FAFC]"
+      >
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16">
+          <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="mb-8 sm:mb-12">
+            <h2 className="text-[#0B1F3A] text-[28px] sm:text-[36px] lg:text-[48px] font-['Montserrat',sans-serif] font-bold mb-4 text-center">
+              Bank Account <span className="text-[#F97316]">Details</span>
+            </h2>
+          </motion.div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 max-w-[900px] mx-auto">
             <motion.div
-              initial={{ opacity: 0, y: 15 }}
+              initial={{ opacity: 0, y: 40 }}
               whileInView={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="mt-4 bg-[#FFF7ED] border-l-4 border-[#F97316] rounded-md p-4"
+              transition={{ delay: 0 }}
+              className="bg-white rounded-xl border-2 border-[#E2E8F0] p-6 sm:p-8 shadow-lg hover:border-[#F97316] transition-all"
             >
-              <p className="text-[#0F172A] text-[13px] sm:text-[14px]">
-                <strong>Note:</strong> Registration fee includes conference kit, meals, and access to all sessions. At least one author per accepted paper must register. Certificates for co-authors (not registered) will be provided upon payment of Rs. 500 per co-author.
+              <p className="text-[#64748B] text-[13px] sm:text-[14px] font-semibold mb-2">
+                Account Name
+              </p>
+              <p className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold">
+                BNMIT-MBA
               </p>
             </motion.div>
 
-            {/* Bank Account Details */}
             <motion.div
-              initial={{ opacity: 0, y: 15 }}
+              initial={{ opacity: 0, y: 40 }}
               whileInView={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="mt-6 bg-gradient-to-br from-[#0B1F3A] to-[#1E4ED8] rounded-xl p-6 sm:p-8 text-white"
+              transition={{ delay: 0.05 }}
+              className="bg-white rounded-xl border-2 border-[#E2E8F0] p-6 sm:p-8 shadow-lg hover:border-[#F97316] transition-all"
             >
-              <h3 className="text-[20px] sm:text-[24px] font-['Montserrat',sans-serif] font-bold mb-6">
-                Bank Account Details
-              </h3>
-              
-              {/* Bank Details Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-                  <p className="text-white/70 text-[12px] sm:text-[13px] mb-1">Account Name</p>
-                  <p className="text-white text-[15px] sm:text-[16px] font-semibold">BNMIT-MBA</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-                  <p className="text-white/70 text-[12px] sm:text-[13px] mb-1">Bank Name</p>
-                  <p className="text-white text-[15px] sm:text-[16px] font-semibold">Canara Bank</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-                  <p className="text-white/70 text-[12px] sm:text-[13px] mb-1">Account Number</p>
-                  <p className="text-white text-[15px] sm:text-[16px] font-semibold">1147101031035</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-                  <p className="text-white/70 text-[12px] sm:text-[13px] mb-1">IFSC Code</p>
-                  <p className="text-white text-[15px] sm:text-[16px] font-semibold">CNRB0001147</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-                  <p className="text-white/70 text-[12px] sm:text-[13px] mb-1">Branch Code</p>
-                  <p className="text-white text-[15px] sm:text-[16px] font-semibold">1147</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-                  <p className="text-white/70 text-[12px] sm:text-[13px] mb-1">MICR Code</p>
-                  <p className="text-white text-[15px] sm:text-[16px] font-semibold">560015006</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 sm:col-span-2">
-                  <p className="text-white/70 text-[12px] sm:text-[13px] mb-1">Branch Address</p>
-                  <p className="text-white text-[14px] sm:text-[15px] font-semibold">24/25, 27th Cross, Sevakshetra Complex, Banashankari II Stage, Bangalore - 560070</p>
-                </div>
-              </div>
-              
-              {/* UPI Note */}
-              <div className="mt-6 bg-[#F97316] rounded-lg p-4">
-                <p className="text-white text-[14px] sm:text-[15px] font-medium">
-                  <strong>Note:</strong> While paying through UPI, please add a note as <span className="underline font-bold">'Towards BNMIT Conference 2026'</span>
-                </p>
-              </div>
-              
-              {/* QR Code - Below Bank Details */}
-              <div className="mt-6 flex justify-center">
-                <div className="bg-white rounded-xl p-5 sm:p-6 shadow-lg inline-block">
-                  <img 
-                    src="/UPICODE.png" 
-                    alt="UPI QR Code for Payment" 
-                    className="w-[280px] sm:w-[320px] lg:w-[360px] h-auto mx-auto"
-                  />
-                  <p className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold mt-4 text-center">Scan to Pay via UPI</p>
-                  <p className="text-[#475569] text-[13px] sm:text-[14px] text-center mt-1">Works with GPay, PhonePe, Paytm & all UPI apps</p>
-                </div>
-              </div>
+              <p className="text-[#64748B] text-[13px] sm:text-[14px] font-semibold mb-2">
+                Bank Name
+              </p>
+              <p className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold">
+                Canara Bank
+              </p>
             </motion.div>
-          </motion.div>
-        </div>
-      </section>
 
-      {/* Cancellation Policy */}
-      <section className="py-10 sm:py-12 bg-[#F8FAFC] border-t border-[#E2E8F0]">
-        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16">
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="bg-white rounded-xl border-2 border-[#E2E8F0] p-6 sm:p-8 shadow-lg hover:border-[#F97316] transition-all"
+            >
+              <p className="text-[#64748B] text-[13px] sm:text-[14px] font-semibold mb-2">
+                Account Number
+              </p>
+              <p className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold">
+                1147101031035
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="bg-white rounded-xl border-2 border-[#E2E8F0] p-6 sm:p-8 shadow-lg hover:border-[#F97316] transition-all"
+            >
+              <p className="text-[#64748B] text-[13px] sm:text-[14px] font-semibold mb-2">
+                IFSC Code
+              </p>
+              <p className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold">
+                CNRB0001147
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-white rounded-xl border-2 border-[#E2E8F0] p-6 sm:p-8 shadow-lg hover:border-[#F97316] transition-all"
+            >
+              <p className="text-[#64748B] text-[13px] sm:text-[14px] font-semibold mb-2">
+                Branch Code
+              </p>
+              <p className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold">
+                1147
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+              className="bg-white rounded-xl border-2 border-[#E2E8F0] p-6 sm:p-8 shadow-lg hover:border-[#F97316] transition-all"
+            >
+              <p className="text-[#64748B] text-[13px] sm:text-[14px] font-semibold mb-2">
+                MICR Code
+              </p>
+              <p className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-bold">
+                560015006
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-white rounded-xl border-2 border-[#E2E8F0] p-6 sm:p-8 shadow-lg hover:border-[#F97316] transition-all sm:col-span-2"
+            >
+              <p className="text-[#64748B] text-[13px] sm:text-[14px] font-semibold mb-2">
+                Branch Address
+              </p>
+              <p className="text-[#0B1F3A] text-[15px] sm:text-[16px] font-bold leading-relaxed">
+                24/25, 27th Cross, Sevakshetra Complex, Banashankari II Stage, Bangalore - 560070
+              </p>
+            </motion.div>
+          </div>
+
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 40 }}
             whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            className="mt-8 sm:mt-12 bg-[#FFFBEB] border-2 border-[#FCD34D] rounded-xl p-6 sm:p-8"
           >
-            <h2 className="text-[#0B1F3A] text-[24px] sm:text-[28px] lg:text-[32px] font-['Montserrat',sans-serif] font-bold mb-6 text-center">
-              Cancellation & <span className="text-[#F97316]">Refund Policy</span>
-            </h2>
-            
-            <div className="bg-white rounded-xl border border-[#E2E8F0] overflow-hidden shadow-sm">
-              {/* Refund Policy Row */}
-              <div className="flex flex-col sm:flex-row border-b border-[#E2E8F0]">
-                <div className="sm:w-1/4 bg-[#0B1F3A] px-6 py-5 flex items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <span className="text-white font-bold text-[16px] sm:text-[18px]">Refund Policy</span>
-                  </div>
-                </div>
-                <div className="sm:w-3/4 px-6 py-5 space-y-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full bg-[#10B981] flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <p className="text-[#334155] text-[14px] sm:text-[15px]">
-                      <span className="font-bold text-[#0B1F3A]">Before April 05, 2026:</span> Full refund will be provided (₹1,000 cancellation charges applicable)
-                    </p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full bg-[#EF4444] flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </div>
-                    <p className="text-[#334155] text-[14px] sm:text-[15px]">
-                      <span className="font-bold text-[#0B1F3A]">After April 05, 2026:</span> No refund will be provided
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Notification Row */}
-              <div className="flex flex-col sm:flex-row border-b border-[#E2E8F0]">
-                <div className="sm:w-1/4 bg-[#0B1F3A] px-6 py-5 flex items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <span className="text-white font-bold text-[16px] sm:text-[18px]">Contact</span>
-                  </div>
-                </div>
-                <div className="sm:w-3/4 px-6 py-5 flex items-center">
-                  <p className="text-[#334155] text-[14px] sm:text-[15px]">
-                    Submit cancellation requests in writing to <a href="mailto:bnmitconference@bnmit.in" className="text-[#1E4ED8] font-bold hover:underline">bnmitconference@bnmit.in</a>
-                  </p>
-                </div>
-              </div>
-
-              {/* No-Show Row */}
-              <div className="flex flex-col sm:flex-row">
-                <div className="sm:w-1/4 bg-[#0B1F3A] px-6 py-5 flex items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                      <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                    </div>
-                    <span className="text-white font-bold text-[16px] sm:text-[18px]">No-Show</span>
-                  </div>
-                </div>
-                <div className="sm:w-3/4 px-6 py-5 flex items-center">
-                  <p className="text-[#334155] text-[14px] sm:text-[15px]">
-                    No refunds will be provided for attendees who fail to attend the conference without prior cancellation
-                  </p>
-                </div>
-              </div>
-            </div>
+            <p className="text-[#7C2D12] text-[14px] sm:text-[15px] leading-relaxed">
+              <span className="font-semibold">Note:</span> While paying through UPI, please add a note as 'Towards BNMIT Conference 2026'
+            </p>
           </motion.div>
         </div>
-      </section>
+      </motion.section>
 
-      {/* Registration Form */}
+      {/* Registration Form Section */}
       <motion.section
         ref={contentRef}
         initial="hidden"
         animate={isInView ? "visible" : "hidden"}
         variants={{
           hidden: { opacity: 0 },
-          visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
+          visible: { opacity: 1, transition: { staggerChildren: 0.1 } },
         }}
-        className="py-12 sm:py-16 lg:py-20 bg-white border-t border-[#E2E8F0]"
+        className="py-12 sm:py-16 lg:py-24 bg-white"
       >
-        <div className="max-w-[1000px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16">
-          <motion.h2
-            variants={fadeInUp}
-            className="text-[#0B1F3A] text-[24px] sm:text-[30px] lg:text-[36px] font-['Montserrat',sans-serif] font-bold mb-6 text-center"
-          >
-            Registration <span className="text-[#F97316]">Form</span>
-          </motion.h2>
-
-          {/* Form Card */}
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16">
           <motion.div
             variants={fadeInUp}
-            className="bg-[#F8FAFC] rounded-lg p-5 sm:p-6 lg:p-8 border border-[#E2E8F0]"
+            className="mb-8 sm:mb-10 lg:mb-12"
           >
-            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-5">
-              {/* Personal Information Section */}
-              <div className="border-b border-[#E2E8F0] pb-5">
-                <h3 className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-['Montserrat',sans-serif] font-bold mb-4">
-                  Personal Information
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5 md:col-span-2" ref={(el) => { fieldRefs.current['name'] = el; }}>
-                    <Label htmlFor="name" className="text-[13px]">Full Name *</Label>
-                    <div className="relative">
-                      <Input
-                        id="name"
-                        value={formData.name}
-                        onChange={(e) => handleInputChange("name", e.target.value)}
-                        onBlur={() => handleBlur("name")}
-                        placeholder="Enter your full name"
-                        className={getInputClassName("name")}
-                        aria-invalid={touched.name && !!errors.name}
-                        aria-describedby={errors.name ? "name-error" : undefined}
-                      />
-                      <ValidIndicator field="name" />
-                    </div>
-                    <ErrorMessage field="name" />
-                  </div>
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['nationality'] = el; }}>
-                    <Label htmlFor="nationality" className="text-[13px]">Nationality *</Label>
-                    <div className="relative">
-                      <Input
-                        id="nationality"
-                        value={formData.nationality}
-                        onChange={(e) => handleInputChange("nationality", e.target.value)}
-                        onBlur={() => handleBlur("nationality")}
-                        placeholder="e.g., Indian"
-                        className={getInputClassName("nationality")}
-                        aria-invalid={touched.nationality && !!errors.nationality}
-                        aria-describedby={errors.nationality ? "nationality-error" : undefined}
-                      />
-                      <ValidIndicator field="nationality" />
-                    </div>
-                    <ErrorMessage field="nationality" />
-                  </div>
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['phone'] = el; }}>
-                    <Label htmlFor="phone" className="text-[13px]">Phone Number (with country code) *</Label>
-                    <div className="relative">
-                      <Input
-                        id="phone"
-                        type="tel"
-                        value={formData.phone}
-                        onChange={(e) => handleInputChange("phone", e.target.value)}
-                        onBlur={() => handleBlur("phone")}
-                        placeholder="+91 9876543210"
-                        className={getInputClassName("phone")}
-                        aria-invalid={touched.phone && !!errors.phone}
-                        aria-describedby={errors.phone ? "phone-error" : undefined}
-                      />
-                      <ValidIndicator field="phone" />
-                    </div>
-                    <ErrorMessage field="phone" />
-                  </div>
-                  <div className="space-y-1.5 md:col-span-2" ref={(el) => { fieldRefs.current['email'] = el; }}>
-                    <Label htmlFor="email" className="text-[13px]">Email ID *</Label>
-                    <div className="relative">
-                      <Input
-                        id="email"
-                        type="email"
-                        value={formData.email}
-                        onChange={(e) => handleInputChange("email", e.target.value)}
-                        onBlur={() => handleBlur("email")}
-                        placeholder="your.email@example.com"
-                        className={getInputClassName("email")}
-                        aria-invalid={touched.email && !!errors.email}
-                        aria-describedby={errors.email ? "email-error" : undefined}
-                      />
-                      <ValidIndicator field="email" />
-                    </div>
-                    <ErrorMessage field="email" />
-                  </div>
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['affiliation'] = el; }}>
-                    <Label htmlFor="affiliation" className="text-[13px]">Affiliation *</Label>
-                    <div className="relative">
-                      <Input
-                        id="affiliation"
-                        value={formData.affiliation}
-                        onChange={(e) => handleInputChange("affiliation", e.target.value)}
-                        onBlur={() => handleBlur("affiliation")}
-                        placeholder="e.g., BNM Institute of Technology"
-                        className={getInputClassName("affiliation")}
-                        aria-invalid={touched.affiliation && !!errors.affiliation}
-                        aria-describedby={errors.affiliation ? "affiliation-error" : undefined}
-                      />
-                      <ValidIndicator field="affiliation" />
-                    </div>
-                    <ErrorMessage field="affiliation" />
-                  </div>
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['placeOfAffiliation'] = el; }}>
-                    <Label htmlFor="placeOfAffiliation" className="text-[13px]">Place of Affiliation *</Label>
-                    <div className="relative">
-                      <Input
-                        id="placeOfAffiliation"
-                        value={formData.placeOfAffiliation}
-                        onChange={(e) => handleInputChange("placeOfAffiliation", e.target.value)}
-                        onBlur={() => handleBlur("placeOfAffiliation")}
-                        placeholder="e.g., Bangalore, Karnataka, India"
-                        className={getInputClassName("placeOfAffiliation")}
-                        aria-invalid={touched.placeOfAffiliation && !!errors.placeOfAffiliation}
-                        aria-describedby={errors.placeOfAffiliation ? "placeOfAffiliation-error" : undefined}
-                      />
-                      <ValidIndicator field="placeOfAffiliation" />
-                    </div>
-                    <ErrorMessage field="placeOfAffiliation" />
-                  </div>
-                </div>
-              </div>
+            <h2 className="text-[#0B1F3A] text-[28px] sm:text-[36px] lg:text-[48px] font-['Montserrat',sans-serif] font-bold mb-3 sm:mb-4 text-center">
+              Registration <span className="text-[#F97316]">Form</span>
+            </h2>
+            <p className="text-[#475569] text-[14px] sm:text-[16px] text-center max-w-[700px] mx-auto">
+              Fill in your details to complete the registration process
+            </p>
+          </motion.div>
 
-              {/* Paper Details Section */}
-              <div className="border-b border-[#E2E8F0] pb-5">
-                <h3 className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-['Montserrat',sans-serif] font-bold mb-4">
-                  Paper Details
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5 md:col-span-2" ref={(el) => { fieldRefs.current['paperTitle'] = el; }}>
-                    <Label htmlFor="paperTitle" className="text-[13px]">Title of the Paper *</Label>
-                    <div className="relative">
-                      <Input
-                        id="paperTitle"
-                        value={formData.paperTitle}
-                        onChange={(e) => handleInputChange("paperTitle", e.target.value)}
-                        onBlur={() => handleBlur("paperTitle")}
-                        placeholder="Enter your paper title"
-                        className={getInputClassName("paperTitle")}
-                        aria-invalid={touched.paperTitle && !!errors.paperTitle}
-                        aria-describedby={errors.paperTitle ? "paperTitle-error" : undefined}
-                      />
-                      <ValidIndicator field="paperTitle" />
-                    </div>
-                    <ErrorMessage field="paperTitle" />
-                  </div>
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['trackNumber'] = el; }}>
-                    <Label htmlFor="trackNumber" className="text-[13px]">Sub-Theme Track *</Label>
-                    <Select 
-                      value={formData.trackNumber} 
-                      onValueChange={(value: string) => {
-                        handleInputChange("trackNumber", value);
-                        setTouched({ ...touched, trackNumber: true });
-                      }}
-                    >
-                      <SelectTrigger 
-                        className={getSelectClassName("trackNumber")}
-                        aria-invalid={touched.trackNumber && !!errors.trackNumber}
-                      >
-                        <SelectValue placeholder="Select research track" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="track1">Track 1: Digital Transformation & Strategic Management</SelectItem>
-                        <SelectItem value="track2">Track 2: Artificial Intelligence, Data & Decision-Making</SelectItem>
-                        <SelectItem value="track3">Track 3: Innovation, Sustainability & Emerging Technologies</SelectItem>
-                        <SelectItem value="track4">Track 4: Human Capital & Future of Work</SelectItem>
-                        <SelectItem value="track5">Track 5: Digital Marketing, Platforms & Consumer Behavior</SelectItem>
-                        <SelectItem value="track6">Track 6: Governance, Ethics & Risk in Tech-Driven Management</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <ErrorMessage field="trackNumber" />
-                  </div>
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['paperId'] = el; }}>
-                    <Label htmlFor="paperId" className="text-[13px]">Paper ID/Code *</Label>
-                    <div className="relative">
-                      <Input
-                        id="paperId"
-                        value={formData.paperId}
-                        onChange={(e) => handleInputChange("paperId", e.target.value)}
-                        onBlur={() => handleBlur("paperId")}
-                        placeholder="e.g., ICSAR-2026-001"
-                        className={getInputClassName("paperId")}
-                        aria-invalid={touched.paperId && !!errors.paperId}
-                        aria-describedby={errors.paperId ? "paperId-error" : undefined}
-                      />
-                      <ValidIndicator field="paperId" />
-                    </div>
-                    <ErrorMessage field="paperId" />
-                  </div>
-                </div>
-              </div>
+          {showWelcomeBack && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 sm:p-6 bg-[#DCFCE7] border-2 border-[#10B981] rounded-xl"
+            >
+              <p className="text-[#166534] text-[14px] sm:text-[15px] font-semibold">
+                Welcome back! Your progress has been saved.
+              </p>
+            </motion.div>
+          )}
 
-              {/* Payment Details Section */}
-              <div className="border-b border-[#E2E8F0] pb-5">
-                <h3 className="text-[#0B1F3A] text-[16px] sm:text-[18px] font-['Montserrat',sans-serif] font-bold mb-4">
-                  Payment Details
-                </h3>
-                <div className="space-y-4">
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['amountPaid'] = el; }}>
-                    <Label htmlFor="amountPaid" className="text-[13px]">Amount Paid *</Label>
-                    <Select 
-                      value={formData.amountPaid} 
-                      onValueChange={(value: string) => {
-                        handleInputChange("amountPaid", value);
-                        setTouched({ ...touched, amountPaid: true });
-                      }}
-                    >
-                      <SelectTrigger 
-                        className={getSelectClassName("amountPaid")}
-                        aria-invalid={touched.amountPaid && !!errors.amountPaid}
+          {authError && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 sm:p-6 bg-[#FEE2E2] border-2 border-[#DC2626] rounded-xl"
+            >
+              <p className="text-[#991B1B] text-[14px] sm:text-[15px] font-semibold">
+                {authError}
+              </p>
+            </motion.div>
+          )}
+
+          <motion.form
+            ref={formRef}
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit();
+            }}
+            variants={fadeInUp}
+            className="bg-white rounded-2xl shadow-2xl border-2 border-[#E2E8F0] p-6 sm:p-8 lg:p-12"
+          >
+            {/* Personal Information */}
+            <div className="mb-8 sm:mb-10">
+              <h3 className="text-[#0B1F3A] text-[20px] sm:text-[24px] font-['Montserrat',sans-serif] font-bold mb-6 sm:mb-8 pb-4 border-b-2 border-[#F97316]">
+                Personal Information
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["name"] = el;
+                  }}
+                >
+                  <Label htmlFor="name" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Full Name *
+                  </Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange("name", e.target.value)}
+                    onBlur={() => handleBlur("name")}
+                    placeholder="Enter your full name"
+                    className={getInputClassName("name", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="name" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["nationality"] = el;
+                  }}
+                >
+                  <Label htmlFor="nationality" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Nationality *
+                  </Label>
+                  <Input
+                    id="nationality"
+                    value={formData.nationality}
+                    onChange={(e) =>
+                      handleInputChange("nationality", e.target.value)
+                    }
+                    onBlur={() => handleBlur("nationality")}
+                    placeholder="e.g., Indian"
+                    className={getInputClassName("nationality", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="nationality" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["phone"] = el;
+                  }}
+                >
+                  <Label htmlFor="phone" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Phone Number (with country code) *
+                  </Label>
+                  <Input
+                    id="phone"
+                    value={formData.phone}
+                    onChange={(e) =>
+                      handleInputChange("phone", e.target.value)
+                    }
+                    onBlur={() => handleBlur("phone")}
+                    placeholder="+91 9876543210"
+                    className={getInputClassName("phone", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="phone" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["email"] = el;
+                  }}
+                >
+                  <Label htmlFor="email" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Email ID * {emailVerified && <span className="text-[#10B981] ml-1">✓</span>}
+                  </Label>
+                  <div className="flex gap-2 mt-2">
+                    <Input
+                      id="email"
+                      value={formData.email}
+                      onChange={(e) =>
+                        handleInputChange("email", e.target.value)
+                      }
+                      onBlur={() => handleBlur("email")}
+                      placeholder="your.email@example.com"
+                      className={getInputClassName("email", "flex-1 h-12")}
+                    />
+                    {!emailVerified && (
+                      <motion.button
+                        type="button"
+                        onClick={sendMagicLink}
+                        disabled={isSendingLink}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="px-4 py-2 bg-[#F97316] text-white rounded-lg font-semibold text-[13px] sm:text-[14px] hover:bg-[#ea580c] disabled:bg-gray-400 transition-colors whitespace-nowrap"
                       >
-                        <SelectValue placeholder="Select the amount you paid" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {feeOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <ErrorMessage field="amountPaid" />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5" ref={(el) => { fieldRefs.current['paymentAccount'] = el; }}>
-                      <Label htmlFor="paymentAccount" className="text-[13px]">Account No. / UPI ID *</Label>
-                      <div className="relative">
-                        <Input
-                          id="paymentAccount"
-                          value={formData.paymentAccount}
-                          onChange={(e) => handleInputChange("paymentAccount", e.target.value)}
-                          onBlur={() => handleBlur("paymentAccount")}
-                          placeholder="e.g., 1234567890 or yourname@upi"
-                          className={getInputClassName("paymentAccount")}
-                          aria-invalid={touched.paymentAccount && !!errors.paymentAccount}
-                          aria-describedby={errors.paymentAccount ? "paymentAccount-error" : undefined}
-                        />
-                        <ValidIndicator field="paymentAccount" />
-                      </div>
-                      <ErrorMessage field="paymentAccount" />
-                    </div>
-                    <div className="space-y-1.5" ref={(el) => { fieldRefs.current['transactionId'] = el; }}>
-                      <Label htmlFor="transactionId" className="text-[13px]">Transaction ID *</Label>
-                      <div className="relative">
-                        <Input
-                          id="transactionId"
-                          value={formData.transactionId}
-                          onChange={(e) => handleInputChange("transactionId", e.target.value)}
-                          onBlur={() => handleBlur("transactionId")}
-                          placeholder="Enter your payment transaction ID"
-                          className={getInputClassName("transactionId")}
-                          aria-invalid={touched.transactionId && !!errors.transactionId}
-                          aria-describedby={errors.transactionId ? "transactionId-error" : undefined}
-                        />
-                        <ValidIndicator field="transactionId" />
-                      </div>
-                      <ErrorMessage field="transactionId" />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5" ref={(el) => { fieldRefs.current['paymentProof'] = el; }}>
-                    <Label htmlFor="paymentProof" className="text-[13px]">Upload Proof of Payment *</Label>
-                    <div className={`relative ${touched.paymentProof && errors.paymentProof ? 'border-[#E53935] bg-[#FFF5F5]' : ''} rounded-md`}>
-                      <input
-                        type="file"
-                        id="paymentProof"
-                        accept="image/*,.pdf"
-                        onChange={handleFileChange}
-                        className={`block w-full text-[13px] text-[#475569] file:mr-3 file:py-2.5 file:px-4 file:rounded-md file:border-0 file:text-[13px] file:font-semibold file:bg-[#1E4ED8] file:text-white hover:file:bg-[#1a3eb3] file:cursor-pointer cursor-pointer border rounded-md transition-colors duration-200 ${
-                          touched.paymentProof && errors.paymentProof 
-                            ? 'border-[#E53935] bg-[#FFF5F5]' 
-                            : touched.paymentProof && formData.paymentProof 
-                              ? 'border-[#10B981]' 
-                              : 'border-[#E2E8F0]'
-                        }`}
-                        aria-invalid={touched.paymentProof && !!errors.paymentProof}
-                      />
-                    </div>
-                    <p className="text-[11px] text-[#475569]">
-                      Accepted: JPG, PNG, PDF (Max 5MB)
-                    </p>
-                    <ErrorMessage field="paymentProof" />
-                    {formData.paymentProof && !errors.paymentProof && (
-                      <p className="text-[13px] text-[#10B981] font-medium flex items-center gap-1">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                        File: {formData.paymentProof.name}
-                      </p>
+                        {isSendingLink ? "Sending..." : "Verify"}
+                      </motion.button>
                     )}
                   </div>
+                  <ErrorMessage field="email" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["affiliation"] = el;
+                  }}
+                >
+                  <Label htmlFor="affiliation" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Affiliation *
+                  </Label>
+                  <Input
+                    id="affiliation"
+                    value={formData.affiliation}
+                    onChange={(e) =>
+                      handleInputChange("affiliation", e.target.value)
+                    }
+                    onBlur={() => handleBlur("affiliation")}
+                    placeholder="e.g., BNM Institute of Technology"
+                    className={getInputClassName("affiliation", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="affiliation" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["placeOfAffiliation"] = el;
+                  }}
+                >
+                  <Label htmlFor="placeOfAffiliation" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Place of Affiliation *
+                  </Label>
+                  <Input
+                    id="placeOfAffiliation"
+                    value={formData.placeOfAffiliation}
+                    onChange={(e) =>
+                      handleInputChange("placeOfAffiliation", e.target.value)
+                    }
+                    onBlur={() => handleBlur("placeOfAffiliation")}
+                    placeholder="e.g., Bangalore, Karnataka"
+                    className={getInputClassName("placeOfAffiliation", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="placeOfAffiliation" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["institution"] = el;
+                  }}
+                >
+                  <Label htmlFor="institution" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Institution/Organization *
+                  </Label>
+                  <Input
+                    id="institution"
+                    value={formData.institution}
+                    onChange={(e) =>
+                      handleInputChange("institution", e.target.value)
+                    }
+                    onBlur={() => handleBlur("institution")}
+                    placeholder="Your institution name"
+                    className={getInputClassName("institution", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="institution" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["country"] = el;
+                  }}
+                >
+                  <Label htmlFor="country" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Country *
+                  </Label>
+                  <Select
+                    value={formData.country}
+                    onValueChange={(value) => {
+                      handleInputChange("country", value);
+                      setTouched({ ...touched, country: true });
+                    }}
+                  >
+                    <SelectTrigger
+                      id="country"
+                      className={getSelectClassName("country") + " mt-2"}
+                    >
+                      <SelectValue placeholder="Select a country" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="India">India</SelectItem>
+                      <SelectItem value="United States">
+                        United States
+                      </SelectItem>
+                      <SelectItem value="United Kingdom">
+                        United Kingdom
+                      </SelectItem>
+                      <SelectItem value="Singapore">Singapore</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <ErrorMessage field="country" />
                 </div>
               </div>
+            </div>
 
-              {/* Submit Button */}
-              <div className="pt-2">
-                <motion.button
-                  type="button"
-                  disabled
-                  className="w-full py-3.5 rounded-md font-semibold text-[15px] transition-all duration-200 bg-gray-300 text-gray-500 cursor-not-allowed"
+            {/* Paper Details */}
+            <div className="mb-8 sm:mb-10">
+              <h3 className="text-[#0B1F3A] text-[20px] sm:text-[24px] font-['Montserrat',sans-serif] font-bold mb-6 sm:mb-8 pb-4 border-b-2 border-[#F97316]">
+                Paper Details
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["paperTitle"] = el;
+                  }}
+                  className="sm:col-span-2"
                 >
-                  CMT submission link will be coming shortly
-                </motion.button>
-                <p className="text-center text-[12px] text-[#475569] mt-3">
-                  By submitting, you agree to our terms and conditions. We will verify your payment and send confirmation to your email.
-                </p>
+                  <Label htmlFor="paperTitle" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Title of the Paper *
+                  </Label>
+                  <Input
+                    id="paperTitle"
+                    value={formData.paperTitle}
+                    onChange={(e) =>
+                      handleInputChange("paperTitle", e.target.value)
+                    }
+                    onBlur={() => handleBlur("paperTitle")}
+                    placeholder="Enter your paper title"
+                    className={getInputClassName("paperTitle", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="paperTitle" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["trackNumber"] = el;
+                  }}
+                >
+                  <Label htmlFor="trackNumber" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Sub-Theme Track *
+                  </Label>
+                  <Select
+                    value={formData.trackNumber}
+                    onValueChange={(value) => {
+                      handleInputChange("trackNumber", value);
+                      setTouched({ ...touched, trackNumber: true });
+                    }}
+                  >
+                    <SelectTrigger
+                      id="trackNumber"
+                      className={getSelectClassName("trackNumber") + " mt-2"}
+                    >
+                      <SelectValue placeholder="Select a track" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="track1">
+                        Track 1: Digital Transformation & Strategic Management
+                      </SelectItem>
+                      <SelectItem value="track2">
+                        Track 2: Artificial Intelligence & Data
+                      </SelectItem>
+                      <SelectItem value="track3">
+                        Track 3: Innovation & Sustainability
+                      </SelectItem>
+                      <SelectItem value="track4">
+                        Track 4: Human Capital & Future of Work
+                      </SelectItem>
+                      <SelectItem value="track5">
+                        Track 5: Digital Marketing & Platforms
+                      </SelectItem>
+                      <SelectItem value="track6">
+                        Track 6: Governance & Ethics
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <ErrorMessage field="trackNumber" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["paperId"] = el;
+                  }}
+                >
+                  <Label htmlFor="paperId" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Paper ID/Code *
+                  </Label>
+                  <Input
+                    id="paperId"
+                    value={formData.paperId}
+                    onChange={(e) =>
+                      handleInputChange("paperId", e.target.value)
+                    }
+                    onBlur={() => handleBlur("paperId")}
+                    placeholder="e.g., ICSAR-2026-001"
+                    className={getInputClassName("paperId", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="paperId" />
+                </div>
               </div>
-            </form>
-          </motion.div>
+            </div>
+
+            {/* Payment Details */}
+            <div className="mb-8 sm:mb-10">
+              <h3 className="text-[#0B1F3A] text-[20px] sm:text-[24px] font-['Montserrat',sans-serif] font-bold mb-6 sm:mb-8 pb-4 border-b-2 border-[#F97316]">
+                Payment Details
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["amountPaid"] = el;
+                  }}
+                  className="sm:col-span-2"
+                >
+                  <Label htmlFor="amountPaid" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Amount Paid *
+                  </Label>
+                  <Select
+                    value={formData.amountPaid}
+                    onValueChange={(value) => {
+                      handleInputChange("amountPaid", value);
+                      setTouched({ ...touched, amountPaid: true });
+                    }}
+                  >
+                    <SelectTrigger
+                      id="amountPaid"
+                      className={getSelectClassName("amountPaid") + " mt-2"}
+                    >
+                      <SelectValue placeholder="Select the amount you paid" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {feeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <ErrorMessage field="amountPaid" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["paymentAccount"] = el;
+                  }}
+                >
+                  <Label htmlFor="paymentAccount" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Account No. / UPI ID *
+                  </Label>
+                  <Input
+                    id="paymentAccount"
+                    value={formData.paymentAccount}
+                    onChange={(e) =>
+                      handleInputChange("paymentAccount", e.target.value)
+                    }
+                    onBlur={() => handleBlur("paymentAccount")}
+                    placeholder="e.g., 1234567890 or yourname@upi"
+                    className={getInputClassName("paymentAccount", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="paymentAccount" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["transactionId"] = el;
+                  }}
+                >
+                  <Label htmlFor="transactionId" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Transaction ID *
+                  </Label>
+                  <Input
+                    id="transactionId"
+                    value={formData.transactionId}
+                    onChange={(e) =>
+                      handleInputChange("transactionId", e.target.value)
+                    }
+                    onBlur={() => handleBlur("transactionId")}
+                    placeholder="Enter your transaction ID"
+                    className={getInputClassName("transactionId", "mt-2 h-12")}
+                  />
+                  <ErrorMessage field="transactionId" />
+                </div>
+
+                <div
+                  ref={(el) => {
+                    fieldRefs.current["paymentProof"] = el;
+                  }}
+                  className="sm:col-span-2"
+                >
+                  <Label htmlFor="paymentProof" className="text-[#0B1F3A] font-semibold text-[14px] sm:text-[15px]">
+                    Upload Proof of Payment *
+                  </Label>
+                  <input
+                    id="paymentProof"
+                    type="file"
+                    onChange={handleFileChange}
+                    onBlur={() => handleBlur("paymentProof")}
+                    accept=".jpg,.jpeg,.png,.pdf"
+                    className={getInputClassName("paymentProof", "mt-2 h-12")}
+                  />
+                  <p className="text-[#64748B] text-[12px] sm:text-[13px] mt-2">
+                    Accepted: JPG, PNG, PDF (Max 5MB)
+                  </p>
+                  {formData.paymentProof && !errors.paymentProof && (
+                    <p className="text-[#10B981] text-[13px] sm:text-[14px] mt-2 font-semibold">
+                      ✓ File: {(formData.paymentProof as File).name}
+                    </p>
+                  )}
+                  <ErrorMessage field="paymentProof" />
+                </div>
+              </div>
+            </div>
+
+            {/* Submit Section */}
+            <div className="border-t-2 border-[#E2E8F0] pt-6 sm:pt-8">
+              <p className="text-[#475569] text-[13px] sm:text-[14px] mb-4 leading-relaxed">
+                By submitting, you agree to our terms and conditions. We will verify your payment and send confirmation to your email.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
+                <motion.button
+                  type="submit"
+                  disabled={isSubmitting || !isFormValid}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex-1 bg-gradient-to-r from-[#0B1F3A] to-[#1E4ED8] text-white px-8 py-3 sm:py-4 rounded-lg font-['Montserrat',sans-serif] font-semibold text-[14px] sm:text-[16px] hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  {isSubmitting ? "Submitting..." : "Submit Registration"}
+                </motion.button>
+              </div>
+            </div>
+          </motion.form>
         </div>
       </motion.section>
-    {/* CMT Acknowledgment Footer */}
-    <footer className="cmt-acknowledgment">
-      <div className="cmt-container">
-        <div className="cmt-title">Submission Platform Acknowledgment</div>
-        <p>
-          The Microsoft CMT service was used for managing the peer-reviewing process for this conference. This service was provided for free by Microsoft and they bore all expenses, including costs for Azure cloud services as well as for software development and support.
-        </p>
-      </div>
-    </footer>
-  </div>
-);
+
+      {/* CTA Section */}
+      <section className="py-16 sm:py-20 lg:py-24 bg-[#F8FAFC]">
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16">
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="bg-gradient-to-br from-[#0B1F3A] to-[#1E4ED8] rounded-xl sm:rounded-2xl p-6 sm:p-8 lg:p-12 text-white text-center"
+          >
+            <h3 className="text-[24px] sm:text-[32px] lg:text-[40px] font-['Montserrat',sans-serif] font-bold mb-4 sm:mb-6">
+              Questions About Registration?
+            </h3>
+            <p className="text-[14px] sm:text-[16px] lg:text-[18px] mb-6 sm:mb-8 max-w-[700px] mx-auto opacity-90">
+              Contact us at bnmitconference@bnmit.in for any queries or assistance
+            </p>
+          </motion.div>
+        </div>
+      </section>
+    </div>
+  );
 }
