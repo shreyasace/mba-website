@@ -4,7 +4,8 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
-import { supabase } from "@/lib/supabase";
+
+import { supabase } from "../../lib/supabase";
 
 
 interface RegistrationPageProps {
@@ -65,6 +66,7 @@ interface FieldErrors {
   transactionId?: string;
   paymentProof?: string;
 }
+}
 
 // Touched fields type
 interface TouchedFields {
@@ -72,22 +74,8 @@ interface TouchedFields {
 }
 
 export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
-<<<<<<< HEAD
-  const [formData, setFormData] = useState({
-    name: "",
-    nationality: "",
-    phone: "",
-    email: "",
-    affiliation: "",
-    placeOfAffiliation: "",
-    paperTitle: "",
-    trackNumber: "",
-    paperId: "",
-    amountPaid: "",
-    paymentAccount: "",
-    transactionId: "",
-    paymentProof: null as File | null
-  });
+// removed merge conflict marker
+
 
   const [errors, setErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<TouchedFields>({});
@@ -97,7 +85,7 @@ export function RegistrationPage({ onNavigate }: RegistrationPageProps) {
 
   const formRef = useRef<HTMLFormElement>(null);
   const fieldRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-=======
+// removed merge conflict marker
   const [emailVerified, setEmailVerified] = useState(false);
   const [isSendingLink, setIsSendingLink] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -291,7 +279,7 @@ const sendMagicLink = async () => {
     alert("Registration failed. Please try again.");
   }
 };
->>>>>>> d8d9962665b5be0570078128bc4ae96cca23f498
+// removed merge conflict marker
 
   const contentRef = useRef(null);
   const isInView = useInView(contentRef, { once: true, amount: 0.2 });
@@ -320,7 +308,7 @@ const sendMagicLink = async () => {
     }
   ];
 
-<<<<<<< HEAD
+
   const feeOptions = [
     { value: "800", label: "Student (Indian) - Early Bird: ₹800" },
     { value: "1200", label: "Student (Indian) - Regular: ₹1,200" },
@@ -335,7 +323,7 @@ const sendMagicLink = async () => {
     { value: "120", label: "Industry/Practitioner (International) - Early Bird: $120" },
     { value: "150", label: "Industry/Practitioner (International) - Regular: $150" }
   ];
-=======
+
   
   const handleNext = () => {
     if (currentStep === 2 && !emailVerified) {
@@ -348,7 +336,7 @@ const sendMagicLink = async () => {
   const handlePrevious = () => {
     if (currentStep > 1) setCurrentStep(currentStep - 1);
   };
->>>>>>> d8d9962665b5be0570078128bc4ae96cca23f498
+
 
   const handleInputChange = (field: string, value: any) => {
     setFormData({ ...formData, [field]: value });
@@ -1255,18 +1243,3 @@ const sendMagicLink = async () => {
               </motion.button>
             </div>
 >>>>>>> d8d9962665b5be0570078128bc4ae96cca23f498
-          </motion.div>
-        </div>
-      </motion.section>
-    {/* CMT Acknowledgment Footer */}
-    <footer className="cmt-acknowledgment">
-      <div className="cmt-container">
-        <div className="cmt-title">Submission Platform Acknowledgment</div>
-        <p>
-          The Microsoft CMT service was used for managing the peer-reviewing process for this conference. This service was provided for free by Microsoft and they bore all expenses, including costs for Azure cloud services as well as for software development and support.
-        </p>
-      </div>
-    </footer>
-  </div>
-);
-}
